@@ -1,32 +1,3 @@
-# Immersive Paintings: Enhanced
-
-An addon for **Immersive Paintings** (Fabric, Minecraft 1.18.2) that keeps the original mod
-untouched but fixes the places where it does not fit the rest of a heavily modded world.
-
-No new items, blocks or entity types are added - everything is done by teaching the existing
-painting entity and painting item new tricks.
-
-Current enhancements:
-
-| Enhancement | Default | Config key |
-| --- | --- | --- |
-| Hang pictures at **45 degrees** (sneak + right click a wall) | on | - |
-| Angled pictures **ignore the support rule** and never drop | on | `angledIgnoresSupport` |
-| **Precise picking** for angled pictures (the oversized box no longer eats clicks) | on | `preciseAngledPicking` |
-| **Create contraptions / trains ignore pictures** instead of pushing, teleporting and killing them | on | `disableContraptionCollision`, `onlyTrains` |
-
-## Usage
-
-| Action | Result |
-| --- | --- |
-| Right click a wall | normal, axis aligned painting (unchanged) |
-| **Sneak + right click a wall** | painting tilted 45 degrees |
-
-While sneaking, the diagonal is chosen by *where on the block face you click*: the picture is
-centred on the vertical block edge closest to your crosshair, and the canvas is tilted away from
-the block so that it only touches that edge. Clicking the left half or the right half of a face
-therefore gives you the two mirror-image diagonals.
-
 The angle is stored in Immersive Paintings' existing `rotation` field, which is already written to
 NBT and sent to clients in `PaintingModifyMessage`, so:
 
@@ -131,17 +102,6 @@ way it works both in a production instance and in a development environment wher
 remapped to yarn names, and an unexpected Create update degrades to "feature off" instead of a
 crash.
 
-## Building
-
-Requires a JDK 21 to run Gradle (the mod itself targets Java 17):
-
-```powershell
-$env:JAVA_HOME = "D:\codename_EndDavid\hello java\jdk-21.0.2"
-.\gradlew.bat build
-```
-
-The jar ends up in `build/libs/`.
-
 ## Known limitations
 
 * The entity's bounding box is still the axis aligned cube around the diagonal; only *picking* and
@@ -192,16 +152,3 @@ reads its protected fields through `@Shadow`, and rewrites its bytecode at runti
 That makes it a derivative work of a GPL-3.0-only project, so it must be distributed under the same
 license. The optional Create and Immersive Painting Blocks integrations are covered by the same
 license, because they ship in the same jar.
-
-Attribution:
-
-* Immersive Paintings - Copyright Luke100000 and contributors, GPL-3.0-only
-  (<https://github.com/Luke100000/ImmersivePaintings>).
-* This addon - Copyright its authors, GPL-3.0-only.
-
-Because the GPL requires that recipients can obtain the corresponding source, any distributed jar
-should be accompanied by this repository or by the sources jar produced by `./gradlew build`
-(`build/libs/*-sources.jar`). If you distribute a modified version, state the changes and keep the
-license and copyright notices intact - you may not relicense it under a more permissive or a more
-restrictive license.
-
