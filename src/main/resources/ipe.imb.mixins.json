@@ -1,0 +1,14 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.ipe.angled.mixin",
+  "plugin": "com.ipe.angled.mixin.ImbMixinPlugin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "ImbEventsMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
+

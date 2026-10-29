@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "ipe",
+  "version": "${version}",
+  "name": "Immersive Paintings: Enhanced",
+  "description": "Enhancements for Immersive Paintings: hang pictures at 45 degrees, and stop Create contraptions and trains from colliding with pictures.",
+  "authors": [
+    "EnderDavid"
+  ],
+  "license": "GPL-3.0-only",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.ipe.IpeMod"
+    ]
+  },
+  "mixins": [
+    "ipe.mixins.json",
+    "ipe.imb.mixins.json",
+    "ipe.create.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.14.0",
+    "minecraft": "~1.18.2",
+    "java": ">=17",
+    "immersive_paintings": ">=0.6.7"
+  },
+  "suggests": {
+    "imb": "*",
+    "create": "*"
+  }
+}
