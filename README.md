@@ -26,6 +26,14 @@ the block so that it only touches that edge.
 This mod makes immersive painting entities ignore collisions with create trains,
 preventing weird entity displacement or bugs when trains trying to interact with painting entity.
 
+### Before
+
+![](imgs/output1.gif)
+
+### After
+
+![](imgs/output2.gif)
+
 ## Attribution
 
 * Immersive Paintings - Copyright Luke100000 and contributors, GPL-3.0-only

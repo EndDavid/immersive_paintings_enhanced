@@ -8,6 +8,7 @@
     "EnderDavid"
   ],
   "license": "GPL-3.0-only",
+  "icon": "assets/ipe/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
