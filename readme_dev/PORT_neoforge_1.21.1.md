@@ -187,15 +187,14 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
 
 ## 4. 验证进行到哪一步
 
-这台机器**无法完整构建**，原因在环境而不在代码：
+这台机器**无法完整构建**，原因在环境而不在代码（详细诊断与修复见 §4.2）：
 
-* `maven.neoforged.net` 连接超时（25 s 无响应），而 ModDevGradle 必须从它下载
-  `net.neoforged:neoform:<ver>:zip` 与 `net.neoforged:neoforge:<ver>`；
-* `gradle-8.12` 的 wrapper 分发包下载时 JDK 报 `PKIX path building failed`
-  （本机 HTTPS 被中间人代理，JDK 21 的 cacerts 里没有对应根证书），
-  本地缓存里只有 `gradle-8.12-bin.zip.part`（未完成）与 `gradle-9.3.0`。
+* `gradle-8.12` 的 wrapper 下载失败，报 `PKIX path building failed`（已修复，见 §4.2(1)）；
+* `maven.neoforged.net` 在这个网络下根本连不上（DNS 被污染 + 直连被封），
+  而 ModDevGradle 必须从它下载 `net.neoforged:neoform:<ver>:zip` 与 `net.neoforged:neoforge:<ver>`
+  （未解决，见 §4.2(2)）。
 
-因此**编译 / 启动游戏都没有跑过**。为了避免「写完就扔」，改用可离线完成的三种核对：
+因此**编译 / 启动游戏都没有跑过**。为了避免「写完就扔」，改用可离线完成的四项核对：
 
 1. **官方映射表核对**：下载 `1.21.1` 的 Mojang `client.txt`，逐个确认本移植用到的成员名与描述符
    （`calculateBoundingBox`、`AABB.ofSize`、`Vec3.x/y/z`、`absRotateTo`、`EntityHitResult(Entity, Vec3)`、
@@ -211,8 +210,7 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
    这是 §2.1 那个简化的前提。
 4. **语法核对**：用 JDK 21 的 `javac` 对全部源码做无 classpath 编译，除「找不到符号」外没有其它错误。
 
-> 换句话说：**API 形状是核对过的，运行时行为没有实测过**。第一次真正跑 `runClient` 时，
-> 请重点看下面这几件事。
+> 换句话说：**API 形状是核对过的，运行时行为没有实测过**。
 
 ### 4.1 首次运行要重点确认
 
@@ -221,6 +219,117 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
 3. 斜画正前方的方块能否正常右键/破坏（`ProjectileUtilMixin` 是否生效）。
 4. 存档 → 退出 → 重进，斜画角度是否保持（靠上游 `Rotation` NBT 字段）。
 5. 装了 Create 时：把画放在铁轨边，让列车通过，画不应被推走/消失。
+
+### 4.2 本机的两个网络问题
+
+只是排查记录，换机器可以直接跳过。
+
+#### (1) 已解决：`PKIX path building failed`
+
+现象：`.\gradlew.bat build` 在下载 Gradle 分发包这一步就崩，栈顶是
+`sun.security.provider.certpath.SunCertPathBuilderException: unable to find valid certification path`。
+开不开代理都一样，因为**这一步根本没走代理**——是 JVM 自己的信任库不认那张证书。
+
+诊断（用同一个 JDK 跑一个 `HttpsURLConnection` 探针）：
+
+| 信任库 | 锚点数量 | 结果 |
+| --- | --- | --- |
+| JDK 默认 `jdk-21.0.2/lib/security/cacerts` | 106 | `PKIX path building failed` |
+| Windows 证书库（`-Djavax.net.ssl.trustStoreType=Windows-ROOT`） | 73 | HTTP 200 |
+
+根因：`services.gradle.org/distributions/...` 会 302 到 **GitHub release assets**
+(`release-assets.githubusercontent.com`)，这条链的根证书在 Windows 库里有、但**不在这台机器
+JDK 的 cacerts 里**（cacerts 与系统证书库不一致，通常是 JDK 被解压/patch 过或 cacerts 被动过）。
+
+修复分两步，都不改 JDK 安装目录：
+
+```powershell
+# A. 让 wrapper 不再联网下载：把发行包手动装进 wrapper 缓存
+$dir = "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.12-bin\cetblhg4pflnnks72fxwobvgv"
+curl.exe -L -o "$dir\gradle-8.12-bin.zip" https://mirrors.cloud.tencent.com/gradle/gradle-8.12-bin.zip
+tar.exe -xf "$dir\gradle-8.12-bin.zip" -C $dir
+New-Item -ItemType File -Force "$dir\gradle-8.12-bin.zip.ok" | Out-Null
+```
+
+```properties
+# B. 让 Gradle（含 daemon）信任 Windows 证书库
+#    文件：%USERPROFILE%\.gradle\gradle.properties （用户级，不进仓库）
+org.gradle.jvmargs=-Xmx3G -Djavax.net.ssl.trustStoreType=Windows-ROOT
+```
+
+注意：
+
+* `Expand-Archive` 对这个 zip 会抛「构造函数调用异常」，用 `tar.exe` 解压即可。
+* 腾讯镜像（`mirrors.cloud.tencent.com/gradle/`）实测 15.8 MB/s，130 MB 八秒下完；
+  华为 `mirrors.huaweicloud.com/gradle/` 同样可用，阿里云没有这个目录。
+* `javax.net.ssl.trustStore*` 只影响 JVM 的默认 `SSLContext`；wrapper 是独立进程，要放进 `JAVA_OPTS`。
+  本例用「手动装包」绕过了 wrapper 联网，所以不需要。
+* `Windows-ROOT` 只有 Windows 有。换 Linux/macOS 或修好 JDK 的 cacerts 后要删掉这一行，
+  否则第一次 HTTPS 会报 keystore 类型不存在。
+
+修好后：
+
+```
+.\gradlew.bat --version   ->  Gradle 8.12
+.\gradlew.bat help        ->  BUILD SUCCESSFUL
+```
+
+`help` 能成功说明 Gradle 8.12 + ModDevGradle 2.0.90 插件、`settings.gradle`、`build.gradle` 都没问题。
+
+#### (2) 未解决：`maven.neoforged.net` 在这个网络下不可达
+
+* `Resolve-DnsName` 返回 `103.252.114.11`；AliDNS 返回 `157.240.17.41`（Facebook 网段，明显投毒）；
+  DoH.pub 才给出真实 CNAME `1755624453.rsc.cdn77.org` → `95.173.197.105 / 156.146.44.90 / 84.17.57.26`。
+  用 `curl --resolve` 直连这三个 IP 全部 reset / 超时，`Test-NetConnection -Port 443` 也是 `False`。
+* 缓存镜像 `bmclapi2.bangbang93.com/maven`（后端是 USTC 的 bmclapi）：
+  * `net/neoforged/neoforge/21.1.154/neoforge-21.1.154.pom` → 200
+  * `net/neoforged/neoforge/21.1.154/neoforge-21.1.154-userdev.jar` → 200（3.9 MB）
+  * `net/neoforged/neoform/1.21.1-20240808.144430/neoform-1.21.1-20240808.144430.zip` → **403**
+    （USTC WAF 拦 `.zip`，加 `UA`、加 `Range` 都一样）
+* ModDevGradle 必须要那个 `neoform` zip：它是「原版 jar + 映射 + NeoForge patch」的原料，
+  在本地跑 NeoForm 才能生成可编译的 Minecraft，缺了它就没有编译期 classpath。
+
+镜像探测汇总（`neoform-1.21.1-20240808.144430.zip` / 同目录 `.pom`）：
+
+| 源 | `.pom` | `.zip` |
+| --- | --- | --- |
+| `bmclapi2.bangbang93.com/maven`（→ USTC bmclapi） | 200 | **403** |
+| `mirrors.ustc.edu.cn/bmclapi/maven` | — | 403 |
+| `mirrors.tuna.tsinghua.edu.cn/bmclapi/maven` | — | 403 |
+| `mirrors.bfsu.edu.cn/bmclapi/maven` | — | 403 |
+| `mirror.nju.edu.cn/bmclapi/maven` | — | 404 |
+| `mirrors.cloud.tencent.com/nexus/.../maven-public` | 404 | 404 |
+| `maven.aliyun.com/repository/public` | 404 | 404 |
+
+规律很清楚：**所有 bmclapi 系镜像的 `.pom` 都能取，只有 `.zip` 被 WAF 拦**。
+换 UA、加 `Range` 头、先 `HEAD` 再 `GET` 都不行，不是防盗链而是按扩展名拦截。
+
+顺带记录：Gradle 的 `--no-daemon` 在这台机器上执行 `createMinecraftArtifacts` 时会安静地卡住
+（CPU 不动、日志不增、java 进程还在），只能 `taskkill /T` 收场。所以构建配置改成了「快速失败」：
+
+* `settings.gradle` 新增 `dependencyResolutionManagement`，并把模式设为
+  `RepositoriesMode.PREFER_SETTINGS`——这样仓库声明对整个 build（包括 ModDevGradle 内部创建的
+  configuration）生效，镜像才真的会被用到；bmclapi 排第一，官方 / Modrinth / Central 兜底。
+* `build.gradle` 删掉项目级 `repositories`（避免与 settings 打架）。
+* `gradle.properties` 加 `connectionTimeout=10000` / `socketTimeout=20000`，
+  不可达的仓库在 10 s 内失败并报错，而不是挂十几分钟。
+
+结论：**这台机器上编译到此为止**，代码没问题、网络有问题。三条出路：
+
+1. **换能通 `maven.neoforged.net` 的网络**（TUN 模式代理 / VPN）。若是 HTTP 代理，再补：
+   ```properties
+   # %USERPROFILE%\.gradle\gradle.properties
+   systemProp.https.proxyHost=127.0.0.1
+   systemProp.https.proxyPort=7890
+   systemProp.http.proxyHost=127.0.0.1
+   systemProp.http.proxyPort=7890
+   ```
+   wrapper 进程不吃 `systemProp`，要设 `JAVA_OPTS=-Dhttps.proxyHost=... -Dhttps.proxyPort=...`。
+2. **从别的机器搬缓存**：在有网的环境跑一次 `.\gradlew.bat build`，把 `~/.gradle/caches/modules-2`
+   （以及 `~/.gradle/caches/neoformruntime`，如果生成了）整个拷过来，Gradle 会直接命中缓存，离线可编译。
+3. **等一个不拦 `.zip` 的 NeoForged 镜像**：找到后把 URL 加到 `settings.gradle`
+   `pluginManagement` 与 `dependencyResolutionManagement` 的**最前面**即可，其余不用改。
+   注意放在最前面的仓库不可达时会先等连接超时（现已压到 10 s），首次解析会慢一些。
 
 ---
 
@@ -240,20 +349,23 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
 ```powershell
 cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1.21.1"
 $env:JAVA_HOME = "D:\codename_EndDavid\hello java\jdk-21.0.2"
-.\gradlew.bat build        # 产物在 build/libs/
+.\gradlew.bat help         # 只验证配置，不碰 NeoForge 网络，应当成功
+.\gradlew.bat build        # 产物在 build/libs/，需要能下载 NeoForge
 .\gradlew.bat runClient    # 需要能下载 NeoForge 与 fzzy_config
 ```
 
 * **JDK**：Gradle 与编译都用 21（`gradle.properties` 里已用 `org.gradle.java.home` 钉死）。
+  这台机器 PATH 上的 `java` 是 17，所以只能靠钉住的路径，`JAVA_HOME` 设不设都行。
 * **Gradle**：wrapper 钉在 `8.12`，与上游 Immersive Paintings 一致（ModDevGradle 2.0.90 的稳定组合）。
-  如果想用 9.x，需要同时把 `net.neoforged.moddev` 升到支持 Gradle 9 的版本。
-* **网络**：`settings.gradle` 里除了官方 `maven.neoforged.net` 之外，挂了一个
-  `bmclapi2.bangbang93.com/maven` 作为 fallback（本机上官方域名不可达时的备用源；
-  该镜像的 `neoform` 制品不一定全，但 `neoforge` 的 pom / userdev jar 是齐的）。
-  若官方源可用，镜像不会被访问。
+  发行包已手动装进 `~/.gradle/wrapper/dists`（见 §4.2(1)），换机器时要重做这一步或能正常联网。
+* **仓库**：`settings.gradle` 用 `dependencyResolutionManagement` + `PREFER_SETTINGS` 统一声明，
+  顺序是 **bmclapi 镜像 → 官方 maven.neoforged.net → Modrinth → Maven Central**。
+  镜像排第一是因为本机上官方域名不可达；如果镜像的 `neoform` zip 被拦（§4.2(2)），
+  Gradle 会回落到官方源——也就是说换到能通官方源的网络后，**不用改配置**。
 * **依赖**：`immersive_paintings 0.8.0+1.21.1` 与 `fzzy_config 0.7.7+1.21+neoforge`
   都从 Modrinth maven 取，二者都在 `neoforge.mods.toml` 里声明了依赖关系。
 * **测试 Create**：Create 不是编译期依赖，把 `create-1.21.1-*.jar` 丢进 `neoforge-1.21.1/run/mods` 即可。
+* **别提交** `build/`、`run/`、`.gradle/`：`neoforge-1.21.1/.gitignore` 已经处理。
 
 ---
 
@@ -265,3 +377,5 @@ $env:JAVA_HOME = "D:\codename_EndDavid\hello java\jdk-21.0.2"
 - [ ] 若 `imb`（Immersive Painting Blocks）发布 1.21.1，按 §3.5 补回兼容 mixin。
 - [ ] 两边稳定后，考虑把共用代码抽成 `common/` 多模块布局（届时可以把 1.18.2 的 `src/` 迁入 `fabric-1.18.2/`）。
 
+- [ ] 与 §4.2(1) 相关的机器级设置（`~/.gradle/gradle.properties` 的 `trustStoreType`、
+  wrapper 缓存里的 Gradle 8.12 发行包）只是本机环境，**不要**提交进仓库。
