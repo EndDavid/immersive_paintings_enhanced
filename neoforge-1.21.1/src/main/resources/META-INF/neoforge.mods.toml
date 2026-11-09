@@ -1,0 +1,48 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "GPL-3.0-only"
+
+[[mods]]
+modId = "ipe"
+version = "0.2.0+1.21.1"
+displayName = "Immersive Paintings: Enhanced"
+authors = "EnderDavid"
+description = '''
+Enhancements for Immersive Paintings: hang pictures at 45 degrees, and stop Create contraptions and trains from colliding with pictures.'''
+logoFile = "icon.png"
+displayTest = "IGNORE_SERVER_VERSION"
+
+[[mixins]]
+config = "ipe.mixins.json"
+
+[[mixins]]
+config = "ipe.create.mixins.json"
+
+[[dependencies.ipe]]
+modId = "minecraft"
+mandatory = true
+versionRange = "[1.21,1.22)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.ipe]]
+modId = "neoforge"
+mandatory = true
+versionRange = "[21.1.0,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.ipe]]
+modId = "immersive_paintings"
+mandatory = true
+versionRange = "[0.8.0,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.ipe]]
+modId = "create"
+mandatory = false
+versionRange = "*"
+ordering = "NONE"
+side = "BOTH"
+

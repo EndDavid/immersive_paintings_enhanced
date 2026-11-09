@@ -1,0 +1,15 @@
+# Gradle
+.gradle/
+build/
+
+# Dev run directories
+run/
+runs/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+

@@ -1,0 +1,19 @@
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+        maven {
+            name = 'NeoForged'
+            url = 'https://maven.neoforged.net/releases'
+        }
+        // Fallback mirror for the NeoForged maven. Only consulted when the
+        // official host is unreachable - see readme_dev/PORT_neoforge_1.21.1.md.
+        maven {
+            name = 'NeoForged mirror (BMCLAPI)'
+            url = 'https://bmclapi2.bangbang93.com/maven'
+        }
+    }
+}
+
+rootProject.name = 'immersive-paintings-enhanced-neoforge-1.21.1'
+

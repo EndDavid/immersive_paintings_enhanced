@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.ipe.angled.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ImmersivePaintingEntityMixin",
+    "ImmersivePaintingItemMixin",
+    "ProjectileUtilMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
+

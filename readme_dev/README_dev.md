@@ -152,3 +152,18 @@ reads its protected fields through `@Shadow`, and rewrites its bytecode at runti
 That makes it a derivative work of a GPL-3.0-only project, so it must be distributed under the same
 license. The optional Create and Immersive Painting Blocks integrations are covered by the same
 license, because they ship in the same jar.
+
+## Multi-version / multi-loader layout
+
+The addon has been ported to **NeoForge 1.21.1**. The repository now holds one directory per
+target instead of a single tree:
+
+| Directory | Target | Branch |
+| --- | --- | --- |
+| `.` (root) | Fabric 1.18.2, `0.2.0` | `main` |
+| `neoforge-1.21.1/` | NeoForge 1.21.1, `0.2.0+1.21.1` | `neoforge/1.21.1` |
+
+`neoforge-1.21.1/` brings its own `gradlew`, so it is an independent build and does not affect the
+Fabric one; build it from inside that folder. See [PORT_neoforge_1.21.1.md](PORT_neoforge_1.21.1.md)
+for the full log: what changed between the two upstream Immersive Paintings versions, which mixins
+were rewritten (and why), what has been verified offline, and what is still untested.

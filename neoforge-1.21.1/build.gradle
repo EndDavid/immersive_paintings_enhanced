@@ -1,0 +1,84 @@
+plugins {
+    id 'java'
+    id 'maven-publish'
+    id 'net.neoforged.moddev' version '2.0.90'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content {
+            includeGroup 'maven.modrinth'
+        }
+    }
+}
+
+neoForge {
+    version = project.neoforge_version
+
+    runs {
+        client {
+            client()
+            getGameDirectory().set(file('run'))
+        }
+        server {
+            server()
+            getGameDirectory().set(file('run/server'))
+        }
+    }
+
+    mods {
+        ipe {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    // Immersive Paintings (required). NeoForge scans the classpath for mod jars,
+    // so this both compiles against it and loads it in the dev runs.
+    implementation "maven.modrinth:immersive-paintings:${project.immersive_paintings_version}"
+
+    // Hard runtime dependency of Immersive Paintings itself.
+    implementation "maven.modrinth:fzzy-config:${project.fzzy_config_version}"
+
+    // Create is optional and never a compile time dependency - see
+    // com.ipe.create.mixin.ContraptionCollisionMixin. Drop the jar into run/mods
+    // if you want to test the contraption fix.
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+}
+
+jar {
+    from('LICENSE') {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+}
+
+publishing {
+    publications {
+        create('mavenJava', MavenPublication) {
+            artifactId = project.archives_base_name
+            from components.java
+        }
+    }
+}
+
