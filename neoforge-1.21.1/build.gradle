@@ -11,6 +11,16 @@ base {
     archivesName = project.archives_base_name
 }
 
+repositories {
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content {
+            includeGroup 'maven.modrinth'
+        }
+    }
+}
+
 neoForge {
     version = project.neoforge_version
 

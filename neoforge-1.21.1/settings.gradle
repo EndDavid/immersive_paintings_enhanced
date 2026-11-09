@@ -1,49 +1,25 @@
 pluginManagement {
     repositories {
-        // Mirror first: on networks where maven.neoforged.net is blocked this is the
-        // only reachable source for the NeoForge artefacts (see
-        // readme_dev/PORT_neoforge_1.21.1.md §4.2).
-        maven {
-            name = 'NeoForged mirror (BMCLAPI)'
-            url = 'https://bmclapi2.bangbang93.com/maven'
-        }
         maven {
             name = 'NeoForged'
             url = 'https://maven.neoforged.net/releases'
+        }
+        // Fallback mirror: on networks where maven.neoforged.net is unreachable this
+        // serves the poms and the userdev jar. It cannot serve the neoform .zip
+        // (WAF blocks it), see readme_dev/PORT_neoforge_1.21.1.md §4.2(2).
+        maven {
+            name = 'NeoForged mirror (BMCLAPI)'
+            url = 'https://bmclapi2.bangbang93.com/maven'
         }
         mavenCentral()
         gradlePluginPortal()
     }
 }
 
-dependencyResolutionManagement {
-    // PREFER_SETTINGS: the repositories below apply to every configuration in the
-    // build, including the ones ModDevGradle creates internally - which is what makes
-    // the mirror actually take effect for the NeoForge / NeoForm artefacts.
-    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
-    repositories {
-        maven {
-            name = 'NeoForged mirror (BMCLAPI)'
-            url = 'https://bmclapi2.bangbang93.com/maven'
-            content {
-                includeGroup 'net.neoforged'
-                includeGroup 'net.neoforged.fancymodloader'
-                includeGroup 'net.minecraftforge'
-            }
-        }
-        maven {
-            name = 'NeoForged'
-            url = 'https://maven.neoforged.net/releases'
-        }
-        maven {
-            name = 'Modrinth'
-            url = 'https://api.modrinth.com/maven'
-            content {
-                includeGroup 'maven.modrinth'
-            }
-        }
-        mavenCentral()
-    }
-}
+// NOTE: deliberately no dependencyResolutionManagement / PREFER_SETTINGS here.
+// ModDevGradle creates its own detached configurations and resolves the NeoForge
+// artefacts through its internal repositories. Overriding that via
+// RepositoriesMode.PREFER_SETTINGS made even `gradlew help` hang for minutes on
+// this network, so the repositories ModDevGradle sets up are left alone.
 
 rootProject.name = 'immersive-paintings-enhanced-neoforge-1.21.1'

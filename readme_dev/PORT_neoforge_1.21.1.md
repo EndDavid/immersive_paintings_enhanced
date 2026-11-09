@@ -305,31 +305,20 @@ org.gradle.jvmargs=-Xmx3G -Djavax.net.ssl.trustStoreType=Windows-ROOT
 换 UA、加 `Range` 头、先 `HEAD` 再 `GET` 都不行，不是防盗链而是按扩展名拦截。
 
 顺带记录：Gradle 的 `--no-daemon` 在这台机器上执行 `createMinecraftArtifacts` 时会安静地卡住
-（CPU 不动、日志不增、java 进程还在），只能 `taskkill /T` 收场。所以构建配置改成了「快速失败」：
+（CPU 不动、日志不增、java 进程还在），只能 `taskkill /T` 收场。
 
-* `settings.gradle` 新增 `dependencyResolutionManagement`，并把模式设为
-  `RepositoriesMode.PREFER_SETTINGS`——这样仓库声明对整个 build（包括 ModDevGradle 内部创建的
-  configuration）生效，镜像才真的会被用到；bmclapi 排第一，官方 / Modrinth / Central 兜底。
-* `build.gradle` 删掉项目级 `repositories`（避免与 settings 打架）。
+**试过但已回退**的改动：把 `settings.gradle` 改成 `dependencyResolutionManagement` +
+`RepositoriesMode.PREFER_SETTINGS`，想让镜像也覆盖 ModDevGradle 内部创建的 configuration。
+原因是 MDG 的 NeoForge 依赖走的是它自己建的 detached configuration，普通 `repositories {}`
+改不到。但这个模式会**连 MDG 自带的仓库一起屏蔽掉**，实测让 `.\gradlew.bat help` 从「29 s 成功」
+变成「卡在 Starting a Gradle Daemon 数分钟」。所以它被回退了，只在注释里留了说明。
+结论：仓库列表交给 MDG 自己维护，我们只保证 `pluginManagement` 能取到 MDG 插件本体。
+
+保留的改动（都是低风险的）：
+
 * `gradle.properties` 加 `connectionTimeout=10000` / `socketTimeout=20000`，
   不可达的仓库在 10 s 内失败并报错，而不是挂十几分钟。
-
-结论：**这台机器上编译到此为止**，代码没问题、网络有问题。三条出路：
-
-1. **换能通 `maven.neoforged.net` 的网络**（TUN 模式代理 / VPN）。若是 HTTP 代理，再补：
-   ```properties
-   # %USERPROFILE%\.gradle\gradle.properties
-   systemProp.https.proxyHost=127.0.0.1
-   systemProp.https.proxyPort=7890
-   systemProp.http.proxyHost=127.0.0.1
-   systemProp.http.proxyPort=7890
-   ```
-   wrapper 进程不吃 `systemProp`，要设 `JAVA_OPTS=-Dhttps.proxyHost=... -Dhttps.proxyPort=...`。
-2. **从别的机器搬缓存**：在有网的环境跑一次 `.\gradlew.bat build`，把 `~/.gradle/caches/modules-2`
-   （以及 `~/.gradle/caches/neoformruntime`，如果生成了）整个拷过来，Gradle 会直接命中缓存，离线可编译。
-3. **等一个不拦 `.zip` 的 NeoForged 镜像**：找到后把 URL 加到 `settings.gradle`
-   `pluginManagement` 与 `dependencyResolutionManagement` 的**最前面**即可，其余不用改。
-   注意放在最前面的仓库不可达时会先等连接超时（现已压到 10 s），首次解析会慢一些。
+* `settings.gradle` 写明镜像的定位（`pom` / userdev jar 的 fallback，取不到 `neoform` zip）。
 
 ---
 
@@ -358,10 +347,11 @@ $env:JAVA_HOME = "D:\codename_EndDavid\hello java\jdk-21.0.2"
   这台机器 PATH 上的 `java` 是 17，所以只能靠钉住的路径，`JAVA_HOME` 设不设都行。
 * **Gradle**：wrapper 钉在 `8.12`，与上游 Immersive Paintings 一致（ModDevGradle 2.0.90 的稳定组合）。
   发行包已手动装进 `~/.gradle/wrapper/dists`（见 §4.2(1)），换机器时要重做这一步或能正常联网。
-* **仓库**：`settings.gradle` 用 `dependencyResolutionManagement` + `PREFER_SETTINGS` 统一声明，
-  顺序是 **bmclapi 镜像 → 官方 maven.neoforged.net → Modrinth → Maven Central**。
-  镜像排第一是因为本机上官方域名不可达；如果镜像的 `neoform` zip 被拦（§4.2(2)），
-  Gradle 会回落到官方源——也就是说换到能通官方源的网络后，**不用改配置**。
+* **仓库**：`pluginManagement` 里是 **官方 maven.neoforged.net → bmclapi 镜像 → Central → Plugin Portal**，
+  `build.gradle` 里只有 Modrinth（用于 `immersive-paintings` / `fzzy-config`）。
+  ModDevGradle 解析 NeoForge 制品用的是它**自己建的仓库**，这一点不要试图用
+  `dependencyResolutionManagement` 覆盖（原因见 §4.2(2) 的回退记录）。
+  所以在能通官方源的机器上，`build` 可以直接跑；在本机无论怎么配都缺 `neoform` zip。
 * **依赖**：`immersive_paintings 0.8.0+1.21.1` 与 `fzzy_config 0.7.7+1.21+neoforge`
   都从 Modrinth maven 取，二者都在 `neoforge.mods.toml` 里声明了依赖关系。
 * **测试 Create**：Create 不是编译期依赖，把 `create-1.21.1-*.jar` 丢进 `neoforge-1.21.1/run/mods` 即可。
