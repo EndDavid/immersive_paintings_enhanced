@@ -353,7 +353,7 @@ Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Setti
 netsh winhttp show proxy
 ```
 
-修复：把系统代理显式喂给 Gradle（用户级 `%USERPROFILE%\.gradle\gradle.properties`）：
+修法：**项目级** 的 `systemProp.*`（`neoforge-1.21.1/gradle.properties`，默认注释掉）：
 
 ```properties
 systemProp.http.proxyHost=127.0.0.1
@@ -363,18 +363,41 @@ systemProp.https.proxyPort=7897
 systemProp.http.nonProxyHosts=localhost|127.*|[::1]
 ```
 
-注意：
+开代理时取消注释，然后 `.\gradlew.bat --stop` 收尾；关代理时务必重新注释掉，否则每次网络请求都会 `Connection refused: connect`。
 
-* 端口要按自己客户端的混合端口填（Clash 系常见 7890/7897，v2rayN 常见 10808/10809）。
-* `nonProxyHosts` 别漏，否则访问本机服务会绕进代理。
-* 如果代理做了 TLS 中间人，还要把它的根证书 `keytool -importcert` 进信任库；
-  本例是纯隧道（端到端 TLS），配合 §4.2(1) 的 `Windows-ROOT` 就够了。
-* `systemProp.*` 只影响 **Gradle daemon** 的 JVM。`gradlew` 脚本自身（下载发行包那一跳）
-  是另一个进程，要额外设 `JAVA_OPTS` / `GRADLE_OPTS`。
+> **教训（本机实测）**：不要把代理写进 `%USERPROFILE%\.gradle\gradle.properties`。
+> 那是**机器级**配置，会让这台机器上所有 Gradle 项目在代理关闭后全部连不上网。
+> 一开始就是这么做的，属于「用修好一次换掉以后每次」的错误取舍，已改回项目级。
 
-配好后 `createMinecraftArtifacts` 一次通过（129 个 artifact，75 s），`build` 随即成功。
+#### (3a) 三个「以为能用」但实测不行的写法
 
----
+| 写法 | 结果 |
+| --- | --- |
+| 用户级 `~/.gradle/gradle.properties` 写 `systemProp.*` | **能通，但污染全局**，代理一关所有项目挂掉 |
+| 命令行 `-Dhttps.proxyHost=... -Dhttps.proxyPort=...` | **无效**。HTTP 客户端在 daemon JVM 里往往早于这些属性初始化，插件/依赖解析仍然直连 |
+| 同上但先 `--stop` 保证全新 daemon | **仍然无效**（实测两次，均报 `Plugin [...] was not found`） |
+| 项目级 `gradle.properties` 写 `systemProp.*` | **有效**（`--refresh-dependencies` 实测 EXIT=0，真实重新解析成功） |
+
+命令行参数里还踩了一个 `.bat` 的坑：
+
+```
+-Dhttp.nonProxyHosts="localhost|127.*"
+→ '127.*' 不是内部或外部命令
+```
+
+`|` 在经 `gradlew.bat`（cmd）传参时会被当成管道，整个构建直接退出（EXIT=255）。
+所以那个参数只适合写在 `gradle.properties` 里。
+
+验证记录（2026-11-10）：
+
+```
+A  无任何代理配置 + 缓存完整          → BUILD SUCCESSFUL（4 s，全 UP-TO-DATE）
+C  --refresh-dependencies + 命令行 -D  → BUILD FAILED（插件解析不出，见上表）
+D  同上但先 --stop                    → BUILD FAILED
+E  项目级 systemProp + --refresh-dependencies → BUILD SUCCESSFUL（1 m 54 s，真实联网）
+```
+
+配好之后 `createMinecraftArtifacts` 一次通过（129 个 artifact，75 s），`build` 随即成功。
 
 ### 4.3 踩坑：Modrinth Maven 会把 Fabric jar 塞给 NeoForge 工程
 
@@ -466,7 +489,7 @@ cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1
 * **Gradle**：wrapper 钉在 `8.12`，与上游 Immersive Paintings 一致（ModDevGradle 2.0.90 的稳定组合）。
   发行包已手动装进 `~/.gradle/wrapper/dists`（见 §4.2(1)），换机器时要重做这一步或能正常联网。
 * **仓库**：`pluginManagement` 里是 **官方 maven.neoforged.net → bmclapi 镜像 → Central → Plugin Portal**，
-  `build.gradle` 里只有 Modrinth（用于 `immersive-paintings` / `fzzy-config`）。
+  `build.gradle` 里只有 Modrinth（用于 `immersive_paintings` / `fzzy-config`）。
   ModDevGradle 解析 NeoForge 制品用的是它**自己建的仓库**，不要试图用
   `dependencyResolutionManagement` 覆盖（原因见 §4.2(2) 的回退记录）。
 * **依赖必须用 Modrinth 版本 ID，不能用版本号**——原因见 §4.3：
@@ -475,6 +498,9 @@ cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1
   * `kotlin_for_forge` → `4qCjWixP`（`kotlinforforge-5.9.0-all.jar`，`runtimeOnly`；缺了它
     `fzzy_config` 会拒绝加载，见 §8.2(1)）
 * **测试 Create**：Create 不是编译期依赖，把 `create-1.21.1-*.jar` 丢进 `neoforge-1.21.1/run/mods` 即可。
+* **需要联网时**（首次构建 / `--refresh-dependencies`）：代理开着的话，取消 `gradle.properties`
+  里那五行 `systemProp.*.proxy*` 的注释，再 `.\gradlew.bat --stop`；用完记得注释回去。
+  详见 4.2(3) 与 4.2(3a)——**不要**写进用户级 `~/.gradle/gradle.properties`，也别指望命令行 `-D`。
 * **别提交** `build/`、`run/`、`.gradle/`：`neoforge-1.21.1/.gitignore` 已处理。
 
 ---
@@ -488,8 +514,9 @@ cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1
 - [ ] 确认 `ProjectileUtilMixin` 在 1.21.1 的准星拾取（`GameRenderer` → `getEntityHitResult`）确实走该重载。
 - [ ] 若 `imb`（Immersive Painting Blocks）发布 1.21.1，按 §3.5 补回兼容 mixin。
 - [ ] 两边稳定后，考虑抽 `common/` 多模块布局（届时把 1.18.2 的 `src/` 迁入 `fabric-1.18.2/`）。
-- [ ] 与 §4.2 相关的机器级设置（`~/.gradle/gradle.properties` 的 `trustStoreType` / 代理、
+- [ ] 与 §4.2 相关的机器级设置（`~/.gradle/gradle.properties` 里的 `trustStoreType` 一行、
   wrapper 缓存里的 Gradle 8.12 发行包）属于本机环境，**不要**提交进仓库。
+  代理配置**不在**机器级文件里，它在 §4.2(3) 说的项目级注释块中。
 
 ---
 
@@ -597,4 +624,3 @@ versionRange = "*"
 * `neoforge-1.21.1/run/server/`（`eula.txt`、`server.properties`、`world/`、`logs/`）已由
   `.gitignore` 排除，不会进仓库。
 * 每次跑完记得确认没有残留的 `java.exe`，否则下次 `runServer` 会因端口 25565 被占用而失败。
-
