@@ -20,29 +20,33 @@ config = "ipe.create.mixins.json"
 
 [[dependencies.ipe]]
 modId = "minecraft"
-mandatory = true
+type = "required"
 versionRange = "[1.21,1.22)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.ipe]]
 modId = "neoforge"
-mandatory = true
+type = "required"
 versionRange = "[21.1.0,)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.ipe]]
 modId = "immersive_paintings"
-mandatory = true
+type = "required"
 versionRange = "[0.8.0,)"
 ordering = "NONE"
 side = "BOTH"
 
+# Create is strictly optional: com.ipe.create.mixin.CreateMixinPlugin only applies the
+# contraption mixin when it is installed. NOTE: this must be "type", not the old Forge
+# "mandatory = false" boolean - NeoForge 21.x ignores/deprecates "mandatory" and treats
+# the dependency as required, which made mod loading abort with
+#     Mod ipe requires create any
 [[dependencies.ipe]]
 modId = "create"
-mandatory = false
+type = "optional"
 versionRange = "*"
 ordering = "NONE"
 side = "BOTH"
-

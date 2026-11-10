@@ -49,6 +49,7 @@ dependencies {
 
     // Hard runtime dependency of Immersive Paintings itself.
     implementation "maven.modrinth:fzzy-config:${project.fzzy_config_version}"
+    runtimeOnly "maven.modrinth:kotlin-for-forge:${project.kotlinforforge_version}"
 
     // Create is optional and never a compile time dependency - see
     // com.ipe.create.mixin.ContraptionCollisionMixin. Drop the jar into run/mods

@@ -223,7 +223,8 @@ BUILD SUCCESSFUL, 2 actionable tasks
    * `UseOnContext#getHitResult()` 是 `protected`，`getClickLocation()` 才是 `public`（这是 §4.4 的由来）。
 4. **语法核对**：用 JDK 21 的 `javac` 对全部源码做无 classpath 编译，除「找不到符号」外没有其它错误。
 
-> 换句话说：**编译与打包是实测过的，mixin 的运行时应用没有实测过**。§4.1 是首次 `runClient` 的检查清单。
+> 换句话说：**编译、打包、模组加载与 mixin 应用都是实测过的**（`runServer`，见 §8）；
+> 仍未实测的只有客户端侧的渲染与交互。§4.1 是 `runClient` 的检查清单。
 
 ### 4.1 首次运行要重点确认
 
@@ -471,6 +472,8 @@ cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1
 * **依赖必须用 Modrinth 版本 ID，不能用版本号**——原因见 §4.3：
   * `immersive_paintings` → `pWBBXq0j`（`immersive_paintings-neoforge-1.21.1-0.8.0.jar`）
   * `fzzy_config` → `uG7oHgw6`（`fzzy_config-0.7.7+1.21+neoforge.jar`）
+  * `kotlin_for_forge` → `4qCjWixP`（`kotlinforforge-5.9.0-all.jar`，`runtimeOnly`；缺了它
+    `fzzy_config` 会拒绝加载，见 §8.2(1)）
 * **测试 Create**：Create 不是编译期依赖，把 `create-1.21.1-*.jar` 丢进 `neoforge-1.21.1/run/mods` 即可。
 * **别提交** `build/`、`run/`、`.gradle/`：`neoforge-1.21.1/.gitignore` 已处理。
 
@@ -479,11 +482,119 @@ cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1
 ## 7. TODO
 
 - [x] 跑通 `.\gradlew.bat build`（2026-11-10，产物 46 KB，2 个 task）。
-- [ ] 跑 `runClient`，补全 §4.1 的验证记录（尤其 mixin 是否全部 `apply` 成功）。
+- [x] 跑通 `runServer`：模组全部加载、无 mixin 应用失败（见 §8）。
+- [ ] 跑 `runClient`，补全 §4.1 剩下的客户端侧验证（§8.3 列出的四项）。
 - [ ] 实测 `ImmersivePaintingEntityMixin` 的对角包围盒在「2 格高画」上是否与原版同样抬高半格。
 - [ ] 确认 `ProjectileUtilMixin` 在 1.21.1 的准星拾取（`GameRenderer` → `getEntityHitResult`）确实走该重载。
 - [ ] 若 `imb`（Immersive Painting Blocks）发布 1.21.1，按 §3.5 补回兼容 mixin。
 - [ ] 两边稳定后，考虑抽 `common/` 多模块布局（届时把 1.18.2 的 `src/` 迁入 `fabric-1.18.2/`）。
 - [ ] 与 §4.2 相关的机器级设置（`~/.gradle/gradle.properties` 的 `trustStoreType` / 代理、
   wrapper 缓存里的 Gradle 8.12 发行包）属于本机环境，**不要**提交进仓库。
+
+---
+
+## 8. 运行期验证记录（2026-11-10）
+
+构建通过之后又跑了一次**开发服务器**（`.\gradlew.bat runServer`，比客户端轻，不需要图形与资源文件），
+用来验证「mixin 能不能真的应用」和「mod 能不能真的加载」。
+
+### 8.1 结果：通过
+
+```
+[modloading-worker-0/INFO] [ipe/]: Immersive Paintings: Enhanced (NeoForge 1.21.1) ready
+                          - sneak + right click a wall to place a 45 degree painting
+[Server thread/INFO] [net.minecraft.server.dedicated.DedicatedServer/]: Starting minecraft server version 1.21.1
+[Server thread/INFO] [net.minecraft.server.MinecraftServer/]: Done (0.604s)! For help, type "help"
+```
+
+同一份日志里加载成功的模组列表：
+
+```
+Fzzy Config 0.7.7+1.21+neoforge (fzzy_config)
+Immersive Paintings 0.8.0 (immersive_paintings)
+Immersive Paintings: Enhanced 0.2.0+1.21.1 (ipe)
+Kotlin For Forge 5.9.0 (kotlinforforge)
+```
+
+关键点：
+
+* **没有任何 `Mixin apply failed` / `InvalidInjectionException`**。`ipe.mixins.json` 是
+  `"required": true` + `"defaultRequire": 1`，任何一条注入点找不到都会让游戏直接崩，
+  所以「服务器能起来」本身就证明三条核心 mixin 的注入点（方法名 / 描述符）在运行时是存在的。
+* `CreateMixinPlugin.onLoad` 没抛异常，`ContraptionCollisionMixin` 因为没装 Create 被正确跳过
+  （日志里没有出现 `Create detected: ...` 那一行）。
+* 唯一残留的警告来自上游：`Reference map 'immersive_paintings.refmap.json' ... could not be read`，
+  这是 modrinth 发布的 jar 没带 refmap 的正常现象，开发环境可忽略。
+
+### 8.2 这一步抓到两个「只有真跑才会暴露」的 bug
+
+#### (1) 缺 KotlinForForge，mod 加载直接中止
+
+```
+Mod fzzy_config requires kotlinforforge 5.3.0 or above
+Currently, kotlinforforge is not installed
+...
+net.neoforged.fml.ModLoadingException: Loading errors encountered
+```
+
+`fzzy_config` 是 Kotlin 写的，它把 KotlinForForge 当硬依赖。上一版 `build.gradle` 只声明了
+`fzzy_config`，所以**编译完全没问题、一跑就崩**。修法：
+
+```groovy
+implementation "maven.modrinth:fzzy-config:${project.fzzy_config_version}"
+runtimeOnly   "maven.modrinth:kotlin-for-forge:${project.kotlinforforge_version}"   // = 4qCjWixP (5.9.0)
+```
+
+用 `runtimeOnly` 是因为我们的代码不编译期引用 Kotlin；选 5.9.0 是因为它的
+`mods.toml` 声明 `loaderVersion = "[5,)"`、`minecraft versionRange = "[1.20.6,1.22)"`，
+覆盖 1.21.1 且不锁死 NeoForge 版本（5.12.0 也可以，但它把 MC 上限写到了 `1.21.9`）。
+
+#### (2) `mandatory = false` 在 NeoForge 21 里**不生效**，Create 变成硬依赖
+
+```
+Missing or unsupported mandatory dependencies:
+    Mod ID: 'create', Requested by: 'ipe', Expected range: '*', Actual version: '[MISSING]'
+...
+net.neoforged.fml.ModLoadingException: Mod ipe requires create any
+```
+
+`neoforge.mods.toml` 里原来写的是 Forge 1.20.1 时代的布尔写法：
+
+```toml
+[[dependencies.ipe]]
+modId = "create"
+mandatory = false      # NeoForge 21.x 已改用 type = "required" | "optional"
+```
+
+NeoForge 21 的依赖声明改成了枚举 `type`，`mandatory` 被忽略，缺省即 `required`。
+结果这个「可有可无的兼容模组」把整个模组变成了**必须装 Create 才能进游戏**。
+修法是四处依赖全部换成 `type = "required"` / `type = "optional"`：
+
+```toml
+[[dependencies.ipe]]
+modId = "create"
+type = "optional"
+versionRange = "*"
+```
+
+> 这一条尤其值得记：编译器、`jar tf`、静态核对**全都发现不了**，只有 FML 的依赖解析会拒绝加载。
+> 也说明「构建成功」和「能玩」之间还隔着一次真实启动。
+
+### 8.3 仍然没有验证的部分
+
+服务器只跑到「加载 + 生成世界」，摸不到客户端渲染与交互。所以下面这些仍是**待实测**：
+
+1. 潜行贴墙右键是否真的出现 45° 贴棱的画（涉及 `@ModifyArg` 那条注入 → 需要客户端 + 创造模式）。
+2. `ProjectileUtilMixin` 的准星拾取是否按预期丢弃「空角落」的命中。
+3. 画的角度在存档/重载后是否保持。
+4. Create 在场时 `ContraptionCollisionMixin` 是否被应用（日志里会出现
+   `Create detected: contraption collision bypass applied to ...`）。
+
+这些需要 `.\gradlew.bat runClient`，属于「有图形界面的人下次开游戏时顺手确认」的事项。
+
+### 8.4 开发服务器留下的东西
+
+* `neoforge-1.21.1/run/server/`（`eula.txt`、`server.properties`、`world/`、`logs/`）已由
+  `.gitignore` 排除，不会进仓库。
+* 每次跑完记得确认没有残留的 `java.exe`，否则下次 `runServer` 会因端口 25565 被占用而失败。
 
