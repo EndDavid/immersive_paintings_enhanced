@@ -18,6 +18,12 @@ config = "ipe.mixins.json"
 [[mixins]]
 config = "ipe.create.mixins.json"
 
+# Optional: refuses to turn a 45 degree graffiti into a block, because that mod's block
+# renderer ignores the stored yaw for wall mounted graffiti. Guarded by ImbMixinPlugin, so
+# it is inert unless "imb" (Immersive Painting Blocks) is installed.
+[[mixins]]
+config = "ipe.imb.mixins.json"
+
 [[dependencies.ipe]]
 modId = "minecraft"
 type = "required"
@@ -48,5 +54,15 @@ side = "BOTH"
 modId = "create"
 type = "optional"
 versionRange = "*"
+ordering = "NONE"
+side = "BOTH"
+
+# Immersive Painting Blocks is optional in the same way: without it the angled graffiti guard in
+# com.ipe.imb.mixin is simply never applied. 1.0.1 is the release that stores yaw and shift data on
+# the block entity, i.e. the version whose internals the guard was written against.
+[[dependencies.ipe]]
+modId = "imb"
+type = "optional"
+versionRange = "[1.0.0,)"
 ordering = "NONE"
 side = "BOTH"

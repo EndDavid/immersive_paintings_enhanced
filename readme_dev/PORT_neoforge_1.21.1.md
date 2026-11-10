@@ -38,7 +38,7 @@ immersive_paintings_angled_1.18.2/          <- 仓库根（目录名保留，避
 * git 分支：本次所有改动都提交在 **`neoforge/1.21.1`** 分支上，`main` 保持为「纯 Fabric 1.18.2 发布线」。
   常用操作：
 
-```powershell
+```
 git branch                      # 查看分支
 git checkout main               # 回到 Fabric 1.18.2 发布线
 git checkout neoforge/1.21.1    # 回到 NeoForge 移植线
@@ -119,13 +119,17 @@ neoforge-1.21.1/src/main/
 │   │   ├── ImmersivePaintingEntityMixin.java 对角包围盒 + 对角 yaw + 免支撑
 │   │   ├── ImmersivePaintingItemMixin.java   潜行放置 45°
 │   │   └── ProjectileUtilMixin.java          精确准星 / 弹射物命中
-│   └── create/mixin/
-│       ├── ContraptionCollisionMixin.java    可选：让 Create 无视画
-│       └── CreateMixinPlugin.java            仅当 Create 存在时才应用上面那条
+│   ├── create/mixin/
+│   │   ├── ContraptionCollisionMixin.java    可选：让 Create 无视画
+│   │   └── CreateMixinPlugin.java            仅当 Create 存在时才应用上面那条
+│   └── imb/mixin/
+│       ├── ImbEventsMixin.java               可选：拒绝把 45° 涂鸦转成方块
+│       └── ImbMixinPlugin.java               仅当 imb 存在时才应用上面那条
 └── resources/
     ├── META-INF/neoforge.mods.toml           模组元数据 + 依赖声明 + mixin 配置注册
     ├── ipe.mixins.json                       核心 mixin（required=true）
     ├── ipe.create.mixins.json                可选 mixin（required=false + plugin）
+    ├── ipe.imb.mixins.json                   可选 mixin（required=false + plugin）
     └── icon.png                              模组图标
 ```
 
@@ -173,15 +177,80 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
 > 1.21.1 的 Create 6.x 直接继承原版方法，但**方法体仍在 `AbstractContraptionEntity` 上**（`public`），
 > 所以 mixin 目标类不变，只是方法名换成 `canCollideWith`。
 
-### 3.5 没有移植的部分
 
-| 1.18.2 功能 | 1.21.1 状态 | 原因 |
+### 3.5 `imb`（Immersive Painting Blocks）兼容
+
+先说清版本关系：**`imb` 的 1.21.1 版本是上游原版（NeoForge）**，
+1.18.2 的那个是移植出来的 Fabric 版。所以 1.21.1 这边依据的是上游真实源码
+（`_ref/addon`，版本 1.0.1），不是反向推断。
+
+#### 为什么仍然「拒绝转换」
+
+`imb` 会把涂鸦实体换成一个 `graffiti_block`，并把原始 `yaw` 存到方块实体上
+（`GraffitiBlockEntity#setGraffitiData`）。但它的渲染器
+
+```java
+// com.imb.client.GraffitiBlockEntityRenderer#render
+switch (facing) {
+    case SOUTH -> poseStack.mulPose(Axis.YP.rotationDegrees(0.0F));
+    case WEST  -> poseStack.mulPose(Axis.YP.rotationDegrees(270.0F));
+    case NORTH -> poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
+    case EAST  -> poseStack.mulPose(Axis.YP.rotationDegrees(90.0F));
+    case UP    -> { poseStack.mulPose(Axis.XP.rotationDegrees(-90.0F)); poseStack.mulPose(Axis.ZP.rotationDegrees(-yaw)); }
+    case DOWN  -> { poseStack.mulPose(Axis.XP.rotationDegrees(90.0F));  poseStack.mulPose(Axis.ZP.rotationDegrees(yaw)); }
+}
+```
+
+**只在 UP/DOWN（地板、天花板）时才用 `yaw`**；四个水平朝向按固定角度旋转、完全忽略它。
+所以 45° 的墙面涂鸦一旦转成方块，画会被平贴回墙面——肉眼可见的错位。
+因此这里选择「拒绝转换，让涂鸦保持为实体」，与 1.18.2 的判断一致。
+
+#### 注入点换了，覆盖面反而更大
+
+| | 1.18.2（Fabric 移植版） | 1.21.1（本工程） |
 | --- | --- | --- |
-| `Immersive Painting Blocks`（`imb`）兼容 mixin | **未移植** | 该模组没有 1.21.1 版本，且它在 1.21 的实体交互签名（`interact`）与 1.18 不同，写了也无法验证 |
-| `ipe.imb.mixins.json` | 删除 | 同上 |
+| 目标 | `com.imb.events.IMBEvents#onUseEntity` | `com.imb.events.IMBEvents#convertGraffitiToBlock` |
+| 签名 | `(PlayerEntity, World, Hand, Entity, EntityHitResult)` | `(Entity) → boolean` |
+| 覆盖 | 只有涂鸦转换器**物品**这一条路径 | 物品事件 + `/imb` 两条命令，全部经过这里 |
 
-如果 `imb` 将来发布 1.21.1，按 1.18.2 的思路补一个 `required=false` + 插件的 mixin 配置即可，
-不需要改动现有代码。
+上游 1.21.1 把转换收敛成 `convertGraffitiToBlock`，`onEntityInteract` 与
+`IMBCommands` 都调用它（已用 `javap` 在 `imb-1.0.1-neo-1.21.1.jar` 上确认方法存在），
+所以在 HEAD 处返回 `false` 就能一次覆盖所有入口。
+
+#### 判定「斜向」不靠 `rotation`
+
+`ImmersivePaintingEntity.rotation` 在 0.8.0 里是 `private`，而 `imb` 的 mixin 不在那个类的
+继承链上，拿不到 `@Shadow`。改用公开的 yaw：
+
+```java
+target instanceof ImmersivePaintingEntity painting
+    && painting.isGraffiti()
+    && DiagonalGeometry.isDiagonalYaw(painting.getYRot())
+```
+
+斜画的 yaw 必然是 `k*90 ± 45`，`floorMod(round(yaw), 90) != 0` 即可稳定区分——
+和 `ProjectileUtilMixin` 用的是同一个判据。
+
+#### 装配方式
+
+```
+src/main/java/com/ipe/imb/mixin/ImbEventsMixin.java     注入本体（targets 用字符串，不编译期依赖 imb）
+src/main/java/com/ipe/imb/mixin/ImbMixinPlugin.java     仅当 imb 存在时才启用上面的配置
+src/main/resources/ipe.imb.mixins.json                  required=false + plugin
+```
+
+* 注入标注 `require = 0`：万一上游以后重命名方法，最坏结果是「静默不生效」，而不是崩游戏。
+* 注入成功后插件会打一行日志，便于确认是否生效：
+  `Immersive Painting Blocks detected: angled graffiti conversion guard applied to com.imb.events.IMBEvents`
+* `neoforge.mods.toml` 里把 `imb` 声明为 **optional**、`versionRange = "[1.0.0,)"`
+  （1.0.1 是当前唯一带上 `yaw` / `shift` 数据的 1.21.1 发布）。
+
+#### 还没做的：让斜向涂鸦真的能转成方块
+
+要支持就得让渲染器对水平朝向也用 `yaw`，并且按对角几何修正 `shiftX/shiftZ`
+（`convertGraffitiToBlock` 目前对水平朝向把深度位移清零）。那需要再 mixin 进
+`com.imb.client.GraffitiBlockEntityRenderer`，属于「改了别人渲染行为」的侵入性改动，
+而且方块碰撞仍是整格，收益有限，所以先不做。
 
 ---
 
@@ -190,13 +259,13 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
 **结论：`.\gradlew.bat build` 已成功，产物在 `build/libs/`。**
 
 ```
-immersive_paintings_enhanced_neoforge-0.2.0+1.21.1.jar          46109 B
-immersive_paintings_enhanced_neoforge-0.2.0+1.21.1-sources.jar  32402 B
+immersive_paintings_enhanced_neoforge-0.2.0+1.21.1.jar          49440 B
+immersive_paintings_enhanced_neoforge-0.2.0+1.21.1-sources.jar  32594 B
 BUILD SUCCESSFUL, 2 actionable tasks
 ```
 
-`jar tf` 确认打进包里的东西是对的：3 个游戏 mixin + Create 兼容 mixin、`ipe.mixins.json`、
-`ipe.create.mixins.json`、`META-INF/neoforge.mods.toml`、`icon.png`。
+`jar tf` 确认打进包里的东西是对的：3 个核心 mixin + Create 兼容 mixin + `imb` 兼容 mixin、
+三份 `*.mixins.json`、`META-INF/neoforge.mods.toml`、`icon.png`。
 
 走到这一步中间踩了两个坑，都不是「代码写错」，值得记下来（见 §4.3 与 §4.4）：
 一是 **Modrinth Maven 按版本号取文件，会把 Fabric 版 jar 塞给 NeoForge 工程**，
@@ -233,6 +302,8 @@ BUILD SUCCESSFUL, 2 actionable tasks
 3. 斜画正前方的方块能否正常右键/破坏（`ProjectileUtilMixin` 是否生效）。
 4. 存档 → 退出 → 重进，斜画角度是否保持（靠上游 `Rotation` NBT 字段）。
 5. 装了 Create 时：把画放在铁轨边，让列车通过，画不应被推走/消失。
+6. 装了 `imb`（Immersive Painting Blocks）时：用涂鸦转换器点斜向涂鸦 —— 应当**保持为实体**
+   （日志里应出现 `Immersive Painting Blocks detected: ...`，转换被拒绝）。
 
 ### 4.2 本机的网络问题（均已解决，留作排查记录）
 
@@ -498,6 +569,9 @@ cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1
   * `kotlin_for_forge` → `4qCjWixP`（`kotlinforforge-5.9.0-all.jar`，`runtimeOnly`；缺了它
     `fzzy_config` 会拒绝加载，见 §8.2(1)）
 * **测试 Create**：Create 不是编译期依赖，把 `create-1.21.1-*.jar` 丢进 `neoforge-1.21.1/run/mods` 即可。
+* **测试 `imb`**：把 `imb-1.0.1-neo-1.21.1.jar`（本机放在仓库之外的 `hello java\` 根目录）
+  复制到 `neoforge-1.21.1/run/server/mods` 或 `run/mods`。它是**可选**依赖，不装也能正常启动；
+  装了之后 `ImbMixinPlugin` 会启用 `ipe.imb.mixins.json`，并在日志里写一行确认。
 * **需要联网时**（首次构建 / `--refresh-dependencies`）：代理开着的话，取消 `gradle.properties`
   里那五行 `systemProp.*.proxy*` 的注释，再 `.\gradlew.bat --stop`；用完记得注释回去。
   详见 4.2(3) 与 4.2(3a)——**不要**写进用户级 `~/.gradle/gradle.properties`，也别指望命令行 `-D`。
@@ -507,12 +581,13 @@ cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1
 
 ## 7. TODO
 
-- [x] 跑通 `.\gradlew.bat build`（2026-11-10，产物 46 KB，2 个 task）。
-- [x] 跑通 `runServer`：模组全部加载、无 mixin 应用失败（见 §8）。
+- [x] 跑通 `.\gradlew.bat build`（2026-11-10，产物约 48 KB）。
+- [x] 跑通 `runServer`：模组全部加载、无 mixin 应用失败（见 §8.1）。
 - [ ] 跑 `runClient`，补全 §4.1 剩下的客户端侧验证（§8.3 列出的四项）。
 - [ ] 实测 `ImmersivePaintingEntityMixin` 的对角包围盒在「2 格高画」上是否与原版同样抬高半格。
 - [ ] 确认 `ProjectileUtilMixin` 在 1.21.1 的准星拾取（`GameRenderer` → `getEntityHitResult`）确实走该重载。
-- [ ] 若 `imb`（Immersive Painting Blocks）发布 1.21.1，按 §3.5 补回兼容 mixin。
+- [x] `imb` 兼容已移植（2026-11-10）。上游 1.21.1 就是原版，注入点改成 `convertGraffitiToBlock`，
+  `require = 1` 试跑通过、`runServer` 日志确认已应用。见 §3.5 与 §8.5。
 - [ ] 两边稳定后，考虑抽 `common/` 多模块布局（届时把 1.18.2 的 `src/` 迁入 `fabric-1.18.2/`）。
 - [ ] 与 §4.2 相关的机器级设置（`~/.gradle/gradle.properties` 里的 `trustStoreType` 一行、
   wrapper 缓存里的 Gradle 8.12 发行包）属于本机环境，**不要**提交进仓库。
@@ -624,3 +699,22 @@ versionRange = "*"
 * `neoforge-1.21.1/run/server/`（`eula.txt`、`server.properties`、`world/`、`logs/`）已由
   `.gitignore` 排除，不会进仓库。
 * 每次跑完记得确认没有残留的 `java.exe`，否则下次 `runServer` 会因端口 25565 被占用而失败。
+
+### 8.5 `imb` 兼容的运行期验证（2026-11-10）
+
+把官方 `imb-1.0.1-neo-1.21.1.jar` 放进 `run/server/mods` 后启动开发服务器：
+
+```
+[modloading-worker-0/INFO] [ipe/]: Immersive Painting Blocks detected: angled graffiti conversion guard
+                          applied to com.imb.events.IMBEvents
+[Server thread/INFO]: Done (0.571s)! For help, type "help"
+```
+
+为了确认「插件生效」不等于「注入点真的找到」，临时把注解改成 `require = 1` 又跑了一次——
+**仍然 `Done (0.618s)`，没有 `InjectionError`**，说明 `convertGraffitiToBlock` 这个注入点确实存在。
+验证完已改回 `require = 0`，并用 `javap -v` 解包成品 jar 确认注解是
+`@Inject(method=["convertGraffitiToBlock"], at=@At(value="HEAD"), cancellable=true, require=0)`。
+
+另外注意：`imb` 的 `graffiti_converter_item_from_glue` 配方引用 `create:super_glue`，
+在没有 Create 的实例里会打印一条 `JsonParseException` 然后跳过该配方——
+这是上游 `imb` 自己的行为（未声明对 Create 的依赖），与本移植无关，也不影响启动。
