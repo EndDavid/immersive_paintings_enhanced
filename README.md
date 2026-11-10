@@ -3,6 +3,8 @@
 An addon for **Immersive Paintings** that keeps the original mod
 untouched but fixes the places where it does not fit the rest of a heavily modded world.
 
+_Now Supported Fabric 1.18.2 & NeoForge 1.21.1._
+
 Current enhancements:
 
 | Enhancement | Default | Config key |
