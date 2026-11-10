@@ -65,7 +65,9 @@ public abstract class ImmersivePaintingItemMixin {
         }
 
         BlockPos attachmentPos = context.getClickedPos().relative(side);
-        Vec3 hit = context.getHitResult().getLocation();
+        // UseOnContext#getHitResult() is protected in 1.21.1; getClickLocation() is the public
+        // equivalent and also returns the exact point where the ray met the block face.
+        Vec3 hit = context.getClickLocation();
         return DiagonalGeometry.chooseRotation(attachmentPos, side, hit.x, hit.z);
     }
 
@@ -74,4 +76,3 @@ public abstract class ImmersivePaintingItemMixin {
         IPE_CONTEXT.remove();
     }
 }
-

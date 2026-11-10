@@ -73,7 +73,7 @@ git checkout neoforge/1.21.1    # 回到 NeoForge 移植线
 | `Item.useOnBlock(ItemUsageContext)` | `Item.useOn(UseOnContext)` |
 | `newPainting(World, BlockPos, Direction, int)` | 不存在了，改为内联 `setPos(BlockPos)` + `setDirection(Direction, int)` |
 | `player.isSneaking()` | `player.isShiftKeyDown()` |
-| `context.getHitPos()` | `context.getHitResult().getLocation()` |
+| `context.getHitPos()` | `context.getClickLocation()`（`getHitResult()` 在 1.21.1 是 `protected`，见 §4.4） |
 | `ProjectileUtil.raycast(...)` + `getEntityCollision(...)` | 合并为两个 `ProjectileUtil.getEntityHitResult(...)` 重载 |
 | `EntityHitResult` 在 `net.minecraft.util.hit` | `net.minecraft.world.phys.EntityHitResult` |
 | Create `Entity#collidesWith` / `method_30949` | `Entity#canCollideWith`（1.20.5 改名） |
@@ -187,14 +187,23 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
 
 ## 4. 验证进行到哪一步
 
-这台机器**无法完整构建**，原因在环境而不在代码（详细诊断与修复见 §4.2）：
+**结论：`.\gradlew.bat build` 已成功，产物在 `build/libs/`。**
 
-* `gradle-8.12` 的 wrapper 下载失败，报 `PKIX path building failed`（已修复，见 §4.2(1)）；
-* `maven.neoforged.net` 在这个网络下根本连不上（DNS 被污染 + 直连被封），
-  而 ModDevGradle 必须从它下载 `net.neoforged:neoform:<ver>:zip` 与 `net.neoforged:neoforge:<ver>`
-  （未解决，见 §4.2(2)）。
+```
+immersive_paintings_enhanced_neoforge-0.2.0+1.21.1.jar          46109 B
+immersive_paintings_enhanced_neoforge-0.2.0+1.21.1-sources.jar  32402 B
+BUILD SUCCESSFUL, 2 actionable tasks
+```
 
-因此**编译 / 启动游戏都没有跑过**。为了避免「写完就扔」，改用可离线完成的四项核对：
+`jar tf` 确认打进包里的东西是对的：3 个游戏 mixin + Create 兼容 mixin、`ipe.mixins.json`、
+`ipe.create.mixins.json`、`META-INF/neoforge.mods.toml`、`icon.png`。
+
+走到这一步中间踩了两个坑，都不是「代码写错」，值得记下来（见 §4.3 与 §4.4）：
+一是 **Modrinth Maven 按版本号取文件，会把 Fabric 版 jar 塞给 NeoForge 工程**，
+二是 `UseOnContext#getHitResult()` 在 1.21.1 是 `protected`。
+
+**仍然没有跑过游戏**。构建成功只证明「能编译、能打包」，不证明 mixin 在运行期能应用。
+为了让这次移植不至于「写完就扔」，除构建外还做了四项可离线完成的核对：
 
 1. **官方映射表核对**：下载 `1.21.1` 的 Mojang `client.txt`，逐个确认本移植用到的成员名与描述符
    （`calculateBoundingBox`、`AABB.ofSize`、`Vec3.x/y/z`、`absRotateTo`、`EntityHitResult(Entity, Vec3)`、
@@ -204,13 +213,17 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
      `protected AABB calculateBoundingBox(BlockPos, Direction)`、`public void setDirection(Direction,int)`、
      `public InteractionResult useOn(UseOnContext)`）；
    * `useOn` 里确实以 `invokevirtual ImmersivePaintingEntity.setDirection:(Direction;I)V` 形式调用
-     （`@ModifyArg` 的注入点因此成立），且 `getEntityType()` 是多态的，发光/涂鸦变体共用同一个 `useOn`。
-3. **原版字节码核对**：对 `1.21.1` 客户端 jar 里的 `HangingEntity` 跑 `javap -p -c`，确认
-   `recalculateBoundingBox()` 真的是「`calculateBoundingBox` → `getCenter()` → `setPosRaw` → `setBoundingBox`」，
-   这是 §2.1 那个简化的前提。
+     （`@ModifyArg` 的注入点因此成立，偏移 134），且 `getEntityType()` 是多态的，发光/涂鸦变体共用同一个 `useOn`。
+3. **NeoForge 反编译源码核对**：直接读 ModDevGradle 生成的
+   `build/moddev/artifacts/neoforge-21.1.154-sources.jar`，确认
+   * `HangingEntity.recalculateBoundingBox()` 真的是「`calculateBoundingBox` → `getCenter()` →
+     `setPosRaw` → `setBoundingBox`」，`calculateBoundingBox` 在 `HangingEntity` 里是 `abstract protected`，
+     但 `ImmersivePaintingEntity` 有具体实现，所以注入点是实方法；
+   * `ProjectileUtil` 的两个重载签名逐字符对得上（见 §3.3）；
+   * `UseOnContext#getHitResult()` 是 `protected`，`getClickLocation()` 才是 `public`（这是 §4.4 的由来）。
 4. **语法核对**：用 JDK 21 的 `javac` 对全部源码做无 classpath 编译，除「找不到符号」外没有其它错误。
 
-> 换句话说：**API 形状是核对过的，运行时行为没有实测过**。
+> 换句话说：**编译与打包是实测过的，mixin 的运行时应用没有实测过**。§4.1 是首次 `runClient` 的检查清单。
 
 ### 4.1 首次运行要重点确认
 
@@ -220,7 +233,7 @@ level.getEntitiesOfClass(Entity.class, box.inflate(2).expandTowards(0, 32, 0), c
 4. 存档 → 退出 → 重进，斜画角度是否保持（靠上游 `Rotation` NBT 字段）。
 5. 装了 Create 时：把画放在铁轨边，让列车通过，画不应被推走/消失。
 
-### 4.2 本机的两个网络问题
+### 4.2 本机的网络问题（均已解决，留作排查记录）
 
 只是排查记录，换机器可以直接跳过。
 
@@ -262,8 +275,6 @@ org.gradle.jvmargs=-Xmx3G -Djavax.net.ssl.trustStoreType=Windows-ROOT
 * `Expand-Archive` 对这个 zip 会抛「构造函数调用异常」，用 `tar.exe` 解压即可。
 * 腾讯镜像（`mirrors.cloud.tencent.com/gradle/`）实测 15.8 MB/s，130 MB 八秒下完；
   华为 `mirrors.huaweicloud.com/gradle/` 同样可用，阿里云没有这个目录。
-* `javax.net.ssl.trustStore*` 只影响 JVM 的默认 `SSLContext`；wrapper 是独立进程，要放进 `JAVA_OPTS`。
-  本例用「手动装包」绕过了 wrapper 联网，所以不需要。
 * `Windows-ROOT` 只有 Windows 有。换 Linux/macOS 或修好 JDK 的 cacerts 后要删掉这一行，
   否则第一次 HTTPS 会报 keystore 类型不存在。
 
@@ -276,7 +287,9 @@ org.gradle.jvmargs=-Xmx3G -Djavax.net.ssl.trustStoreType=Windows-ROOT
 
 `help` 能成功说明 Gradle 8.12 + ModDevGradle 2.0.90 插件、`settings.gradle`、`build.gradle` 都没问题。
 
-#### (2) 未解决：`maven.neoforged.net` 在这个网络下不可达
+#### (2) 已解决：`maven.neoforged.net` 曾经不可达
+
+（换网络 + 挂代理后已恢复，下面的封锁分析保留下来备查。）
 
 * `Resolve-DnsName` 返回 `103.252.114.11`；AliDNS 返回 `157.240.17.41`（Facebook 网段，明显投毒）；
   DoH.pub 才给出真实 CNAME `1755624453.rsc.cdn77.org` → `95.173.197.105 / 156.146.44.90 / 84.17.57.26`。
@@ -311,7 +324,7 @@ org.gradle.jvmargs=-Xmx3G -Djavax.net.ssl.trustStoreType=Windows-ROOT
 `RepositoriesMode.PREFER_SETTINGS`，想让镜像也覆盖 ModDevGradle 内部创建的 configuration。
 原因是 MDG 的 NeoForge 依赖走的是它自己建的 detached configuration，普通 `repositories {}`
 改不到。但这个模式会**连 MDG 自带的仓库一起屏蔽掉**，实测让 `.\gradlew.bat help` 从「29 s 成功」
-变成「卡在 Starting a Gradle Daemon 数分钟」。所以它被回退了，只在注释里留了说明。
+变成「卡在 Starting a Gradle daemon 数分钟」。所以它被回退了，只在注释里留了说明。
 结论：仓库列表交给 MDG 自己维护，我们只保证 `pluginManagement` 能取到 MDG 插件本体。
 
 保留的改动（都是低风险的）：
@@ -320,16 +333,122 @@ org.gradle.jvmargs=-Xmx3G -Djavax.net.ssl.trustStoreType=Windows-ROOT
   不可达的仓库在 10 s 内失败并报错，而不是挂十几分钟。
 * `settings.gradle` 写明镜像的定位（`pom` / userdev jar 的 fallback，取不到 `neoform` zip）。
 
+#### (3) 已解决：Java / Gradle 默认不读 Windows 系统代理
+
+换到可用网络并挂上代理后，浏览器能开、`Invoke-WebRequest` 也能 200，但 `gradlew` 依然报
+`Plugin [id: 'net.neoforged.moddev', version: '2.0.90'] was not found`。
+
+原因：Windows 的代理设置存在注册表
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`（本例 `ProxyEnable=1`、
+`ProxyServer=127.0.0.1:7897`），只有 **WinINET**（IE/Edge/`Invoke-WebRequest`）会读它；
+`netsh winhttp show proxy` 显示「直接访问」，**JVM 完全不认识这个设置**。
+于是 PowerShell 拿到的是 200，Gradle 直连真实 IP 失败——看起来像「仓库没这个包」。
+
+诊断方法（不改任何东西就能看出来）：
+
+```powershell
+Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' |
+  Select-Object ProxyEnable, ProxyServer, AutoConfigURL
+netsh winhttp show proxy
+```
+
+修复：把系统代理显式喂给 Gradle（用户级 `%USERPROFILE%\.gradle\gradle.properties`）：
+
+```properties
+systemProp.http.proxyHost=127.0.0.1
+systemProp.http.proxyPort=7897
+systemProp.https.proxyHost=127.0.0.1
+systemProp.https.proxyPort=7897
+systemProp.http.nonProxyHosts=localhost|127.*|[::1]
+```
+
+注意：
+
+* 端口要按自己客户端的混合端口填（Clash 系常见 7890/7897，v2rayN 常见 10808/10809）。
+* `nonProxyHosts` 别漏，否则访问本机服务会绕进代理。
+* 如果代理做了 TLS 中间人，还要把它的根证书 `keytool -importcert` 进信任库；
+  本例是纯隧道（端到端 TLS），配合 §4.2(1) 的 `Windows-ROOT` 就够了。
+* `systemProp.*` 只影响 **Gradle daemon** 的 JVM。`gradlew` 脚本自身（下载发行包那一跳）
+  是另一个进程，要额外设 `JAVA_OPTS` / `GRADLE_OPTS`。
+
+配好后 `createMinecraftArtifacts` 一次通过（129 个 artifact，75 s），`build` 随即成功。
+
+---
+
+### 4.3 踩坑：Modrinth Maven 会把 Fabric jar 塞给 NeoForge 工程
+
+第一次 `build` 失败在 `compileJava`，报的错很吓人：
+
+```
+ImmersivePaintingEntityMixin.java:67: 错误: 找不到符号 类 class_1530
+ImmersivePaintingEntityMixin.java:71: 错误: 找不到符号 方法 absRotateTo(float,float)
+ProjectileUtilMixin.java:42:         错误: 不兼容的类型: Entity 无法转换为 ImmersivePaintingEntity
+```
+
+看起来像「移植写错了」，其实是**依赖拿错了**：`class_1530` 是 **intermediary**（Fabric 系）里
+`HangingEntity` 的名字。解包看缓存里的 jar 一目了然：
+
+| jar | 元数据 | `ImmersivePaintingEntity` 的父类 |
+| --- | --- | --- |
+| 实际解析到的 | `fabric.mod.json` | `net.minecraft.class_1530` |
+| 应该用的 | `META-INF/neoforge.mods.toml` | `net.minecraft.world.entity.decoration.HangingEntity` |
+
+父类无法解析 → `ImmersivePaintingEntity` 不算 `Entity` 的子类 → 所有继承来的方法
+（`absRotateTo` / `getDirection`）都「找不到符号」，强转也「不兼容」。
+一个根因连坐出十几个错误。
+
+根因在 Modrinth Maven 的寻址方式：`maven.modrinth:<slug>:<version>` 里的 `<version>`
+若填**版本号**，它只是「在项目里找版本号叫这个的文件」，而 `0.8.0+1.21.1` 同时存在两个条目：
+
+```
+version_number = 0.8.0+1.21.1   id = pWBBXq0j   loaders = neoforge   immersive_paintings-neoforge-1.21.1-0.8.0.jar
+version_number = 0.8.0+1.21.1   id = Wv4us2nU   loaders = fabric     immersive_paintings-fabric-1.21.1-0.8.0.jar
+```
+
+于是「先找到哪个就用哪个」，这次命中的是 Fabric 那个。
+
+正确做法是填 **version ID**（唯一对应一个文件）：
+
+```groovy
+implementation "maven.modrinth:immersive-paintings:${project.immersive_paintings_version}"   // = pWBBXq0j
+```
+
+同样的坑对 `fzzy-config` 也存在（1.21.1 的 `0.7.7+1.21+neoforge` 碰巧只有一个条目，
+但没理由赌上游以后不加），所以一并改成 ID `uG7oHgw6`。
+`gradle.properties` 里已把「ID → 文件名」的对应关系写进注释。
+
+> 教训：**多加载器项目在 Modrinth 上，`+1.21.1` 这种版本号不是唯一键**。
+> 按版本号解析是「今天能编、明天上游多传一个 loader 就编不过」的定时炸弹。
+
+### 4.4 踩坑：`UseOnContext#getHitResult()` 在 1.21.1 是 `protected`
+
+`ImmersivePaintingItemMixin` 需要点击位置来算「点中了棱的哪一侧」，1.18.2 用的是
+`ItemUsageContext#getHitPos()`。1.21.1 对应的 `getHitResult()` 被降级成 `protected`：
+
+```
+ImmersivePaintingItemMixin.java:68: 错误: getHitResult() 在 UseOnContext 中是 protected 访问控制
+```
+
+核对 `UseOnContext.java`（来自 `build/moddev/artifacts/neoforge-21.1.154-sources.jar`）：
+
+```java
+33:    protected final BlockHitResult getHitResult() { ... }
+45:    public Vec3 getClickLocation() { return this.hitResult.getLocation(); }
+```
+
+所以改用 `getClickLocation()`——它就是同一个 `hitResult.getLocation()`，只是公开的。
+这也是「先读反编译源码、再写 mixin」比「凭记忆写」可靠的例子：这个访问级别在 1.19/1.20 期间变过。
+
 ---
 
 ## 5. 已知限制（与 1.18.2 一致）
 
-* 包围盒仍是轴对齐的（Minecraft 只存一个 `AABB`），所以 F3+B 看到的还是那个大立方体；
+* 包围盒仍是轴对齐的（Minecraft 每个实体只存一个 `AABB`），所以 F3+B 看到的还是那个大立方体；
   它不再影响交互，但仍用于实体追踪。
 * 只支持墙面（水平朝向）。地板/天花板保持原版行为。
 * 画固定吸附在方块竖棱上，不可自由摆放；多格画从棱对称展开。
 * `/tp` 等传送命令会让画按「包围盒中心取整」重新吸附，斜画可能偏一格；放置、编辑、重载不受影响。
-* Create 的修复依赖 `canCollideWith`；若未来 Create 改用别的谓词，功能会静默失效（日志里会写是否应用成功）。
+* Create 修复依赖 `canCollideWith`；若未来 Create 改用别的谓词，功能会静默失效（日志里会写是否应用成功）。
 
 ---
 
@@ -337,10 +456,8 @@ org.gradle.jvmargs=-Xmx3G -Djavax.net.ssl.trustStoreType=Windows-ROOT
 
 ```powershell
 cd "D:\codename_EndDavid\hello java\immersive_paintings_angled_1.18.2\neoforge-1.21.1"
-$env:JAVA_HOME = "D:\codename_EndDavid\hello java\jdk-21.0.2"
-.\gradlew.bat help         # 只验证配置，不碰 NeoForge 网络，应当成功
-.\gradlew.bat build        # 产物在 build/libs/，需要能下载 NeoForge
-.\gradlew.bat runClient    # 需要能下载 NeoForge 与 fzzy_config
+.\gradlew.bat build        # 产物在 build/libs/
+.\gradlew.bat runClient    # 启动开发客户端
 ```
 
 * **JDK**：Gradle 与编译都用 21（`gradle.properties` 里已用 `org.gradle.java.home` 钉死）。
@@ -349,23 +466,24 @@ $env:JAVA_HOME = "D:\codename_EndDavid\hello java\jdk-21.0.2"
   发行包已手动装进 `~/.gradle/wrapper/dists`（见 §4.2(1)），换机器时要重做这一步或能正常联网。
 * **仓库**：`pluginManagement` 里是 **官方 maven.neoforged.net → bmclapi 镜像 → Central → Plugin Portal**，
   `build.gradle` 里只有 Modrinth（用于 `immersive-paintings` / `fzzy-config`）。
-  ModDevGradle 解析 NeoForge 制品用的是它**自己建的仓库**，这一点不要试图用
+  ModDevGradle 解析 NeoForge 制品用的是它**自己建的仓库**，不要试图用
   `dependencyResolutionManagement` 覆盖（原因见 §4.2(2) 的回退记录）。
-  所以在能通官方源的机器上，`build` 可以直接跑；在本机无论怎么配都缺 `neoform` zip。
-* **依赖**：`immersive_paintings 0.8.0+1.21.1` 与 `fzzy_config 0.7.7+1.21+neoforge`
-  都从 Modrinth maven 取，二者都在 `neoforge.mods.toml` 里声明了依赖关系。
+* **依赖必须用 Modrinth 版本 ID，不能用版本号**——原因见 §4.3：
+  * `immersive_paintings` → `pWBBXq0j`（`immersive_paintings-neoforge-1.21.1-0.8.0.jar`）
+  * `fzzy_config` → `uG7oHgw6`（`fzzy_config-0.7.7+1.21+neoforge.jar`）
 * **测试 Create**：Create 不是编译期依赖，把 `create-1.21.1-*.jar` 丢进 `neoforge-1.21.1/run/mods` 即可。
-* **别提交** `build/`、`run/`、`.gradle/`：`neoforge-1.21.1/.gitignore` 已经处理。
+* **别提交** `build/`、`run/`、`.gradle/`：`neoforge-1.21.1/.gitignore` 已处理。
 
 ---
 
 ## 7. TODO
 
-- [ ] 在能联网的机器上跑一次 `.\gradlew.bat build` 与 `runClient`，补全 §4.1 的验证记录。
+- [x] 跑通 `.\gradlew.bat build`（2026-11-10，产物 46 KB，2 个 task）。
+- [ ] 跑 `runClient`，补全 §4.1 的验证记录（尤其 mixin 是否全部 `apply` 成功）。
 - [ ] 实测 `ImmersivePaintingEntityMixin` 的对角包围盒在「2 格高画」上是否与原版同样抬高半格。
 - [ ] 确认 `ProjectileUtilMixin` 在 1.21.1 的准星拾取（`GameRenderer` → `getEntityHitResult`）确实走该重载。
 - [ ] 若 `imb`（Immersive Painting Blocks）发布 1.21.1，按 §3.5 补回兼容 mixin。
-- [ ] 两边稳定后，考虑把共用代码抽成 `common/` 多模块布局（届时可以把 1.18.2 的 `src/` 迁入 `fabric-1.18.2/`）。
+- [ ] 两边稳定后，考虑抽 `common/` 多模块布局（届时把 1.18.2 的 `src/` 迁入 `fabric-1.18.2/`）。
+- [ ] 与 §4.2 相关的机器级设置（`~/.gradle/gradle.properties` 的 `trustStoreType` / 代理、
+  wrapper 缓存里的 Gradle 8.12 发行包）属于本机环境，**不要**提交进仓库。
 
-- [ ] 与 §4.2(1) 相关的机器级设置（`~/.gradle/gradle.properties` 的 `trustStoreType`、
-  wrapper 缓存里的 Gradle 8.12 发行包）只是本机环境，**不要**提交进仓库。
