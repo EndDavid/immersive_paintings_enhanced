@@ -1,5 +1,7 @@
 # Immersive Paintings: Enhanced
 
+[English](README.md) | [简体中文](README_zh.md)
+
 An addon for **Immersive Paintings** that keeps the original mod
 untouched but fixes the places where it does not fit the rest of a heavily modded world.
 
