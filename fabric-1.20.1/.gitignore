@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+
+# Dev run directories
+run/
+runs/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Local test mods (Create / imb / Immersive Paintings jars)
+_ref+lib_mods/
+mods/
+
+# Java crash logs
+hs_err_*.log
+replay_*.log
+*.hprof
+*.jfr

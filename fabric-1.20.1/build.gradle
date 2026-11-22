@@ -1,0 +1,86 @@
+plugins {
+        id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+        id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+        archivesName = project.archives_base_name
+}
+
+repositories {
+        maven {
+                name = "Modrinth"
+                url = "https://api.modrinth.com/maven"
+                content {
+                        includeGroup "maven.modrinth"
+                }
+        }
+        mavenCentral()
+}
+
+dependencies {
+        minecraft "com.mojang:minecraft:${project.minecraft_version}"
+        mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+        modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+        // Immersive Paintings: required at compile and run time.
+        // Pinned by Modrinth version ID (see gradle.properties): the 1.20.1
+        // release publishes a fabric and a forge file under the same version
+        // number, and resolving by number would be a coin flip.
+        modImplementation "maven.modrinth:immersive-paintings:${project.immersive_paintings_version}"
+
+        // Immersive Paintings itself declares a dependency on fabric-api-base, so
+        // the development runs need the full Fabric API on the mod classpath.
+        // Our own code never imports it.
+        modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+        // "Immersive Painting Blocks" (mod id "imb") is supported optionally, we never
+        // link against it at compile time - see com.ipe.angled.mixin.ImbEventsMixin.
+        //
+        // Create is supported optionally as well, also without a compile time dependency:
+        // see com.ipe.create.mixin.ContraptionCollisionMixin.
+}
+
+processResources {
+        inputs.property "version", project.version
+
+        filesMatching("fabric.mod.json") {
+                expand "version": inputs.properties.version
+        }
+}
+
+tasks.withType(JavaCompile).configureEach {
+        it.options.encoding = "UTF-8"
+        // 1.20.1 is a Java 17 game. Gradle itself has to run on JDK 21 because
+        // Loom 1.15 requires it (see gradle.properties), so pin the bytecode level.
+        it.options.release = 17
+}
+
+java {
+        withSourcesJar()
+
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+}
+
+jar {
+        inputs.property "archivesName", project.base.archivesName
+
+        from("LICENSE") {
+                rename { "${it}_${inputs.properties.archivesName}" }
+        }
+}
+
+publishing {
+        publications {
+                create("mavenJava", MavenPublication) {
+                        artifactId = project.archives_base_name
+                        from components.java
+                }
+        }
+        repositories {
+        }
+}

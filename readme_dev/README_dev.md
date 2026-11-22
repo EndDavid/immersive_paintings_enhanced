@@ -152,3 +152,24 @@ reads its protected fields through `@Shadow`, and rewrites its bytecode at runti
 That makes it a derivative work of a GPL-3.0-only project, so it must be distributed under the same
 license. The optional Create and Immersive Painting Blocks integrations are covered by the same
 license, because they ship in the same jar.
+
+## Multi-version / multi-loader layout
+
+The addon is now maintained as one git branch per target, each with its own independent Gradle
+build inside a versioned subdirectory:
+
+| Directory | Target | Branch |
+| --- | --- | --- |
+| `.` (root) | Fabric 1.18.2, `0.2.0` | `main` |
+| `fabric-1.20.1/` | Fabric 1.20.1, `0.2.0+1.20.1` | `fabric/1.20.1` |
+| `neoforge-1.21.1/` | NeoForge 1.21.1, `0.2.0+1.21.1` | `neoforge/1.21.1` |
+
+Each subdirectory brings its own `gradlew` and `settings.gradle`, so it is an independent build and
+does not affect the Fabric 1.18.2 root project; build it from inside that folder. The mod id (`ipe`)
+and display name (`Immersive Paintings: Enhanced`) are the same on every branch; only the artifact
+name and the `+<minecraft version>` suffix differ.
+
+See [PORT_fabric_1.20.1.md](PORT_fabric_1.20.1.md) for the 1.20.1 log: which upstream APIs were
+checked, why no Java source had to change, what was verified with a dev server, and what is still
+untested. The NeoForge port is documented in `PORT_neoforge_1.21.1.md` on the `neoforge/1.21.1`
+branch (that port rewrote the mixins because 1.21.1 changed the upstream entity model).

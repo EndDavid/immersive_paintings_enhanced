@@ -1,0 +1,14 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.ipe.create.mixin",
+  "plugin": "com.ipe.create.mixin.CreateMixinPlugin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "ContraptionCollisionMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
+
