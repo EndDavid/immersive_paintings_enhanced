@@ -194,8 +194,9 @@ intermediary 名，例如：
 @Inject(method = "method_18075" ...)   // ProjectileUtil#raycast
 ```
 
-这很重要：Loom 1.15 采用「构建期直接重映射 mixin 注解」的方式，不再生成 refmap。
-如果只检查 `build/devlibs/` 里的 dev jar（仍是 Yarn 名）会误以为没处理。
+这很重要：Loom 1.15 默认在构建期直接重映射 mixin 注解（本次产物里没有生成 refmap 文件），
+而不是把 Yarn 名字原样留在发布 jar 里等运行时再处理。如果只检查 `build/devlibs/` 里的
+dev jar（仍是 Yarn 名）会误以为没处理。
 
 ---
 
@@ -237,10 +238,14 @@ ipe 0.2.0+1.20.1
 关键点：
 
 * **没有任何 `Mixin apply failed` / `InvalidInjectionException`**。
-  `ipe.mixins.json` 是 `"required": true` + `"defaultRequire": 1`，三条核心注入
-  （`updateAttachmentPosition`、`canStayAttached`、`useOnBlock` 的 `@ModifyArg`、
-  `ProjectileUtil` 两个重载）只要有一条对不上就会让游戏直接崩。
-  服务器能起来，说明这些注入点在 1.20.1 + IP 0.6.13 上全部匹配。
+  `ipe.mixins.json` 是 `"required": true` + `"defaultRequire": 1`。
+* `AbstractDecorationMixin`（注入 `updateAttachmentPosition` / `canStayAttached`）与
+  `ImmersivePaintingItemMixin`（注入 `useOnBlock` 的 `@ModifyArg`）的目标类在实体 / 物品
+  注册时必然加载，所以这两条注入点已经**实际应用**；如果对不上，服务器会在启动阶段直接崩。
+* `ProjectileUtilMixin` 的目标 `ProjectileUtil` 在纯服务端启动路径中不一定会被加载，
+  因此「服务器能起来」本身不能单独证明它已应用。不过 Loom 已把注解里的
+  `raycast` / `getEntityCollision` 成功重映射为 `method_18075` / `method_37226`，
+  描述符也与 1.20.1 映射逐项一致；真正的客户端准星行为仍列入 §7 待实测。
 * `CreateMixinPlugin` 因为没装 Create 被正确跳过。
 * 上游 IP 自己会打印
   `No data fixer registered for immersive_paintings:painting` 等 4 行 ERROR；
